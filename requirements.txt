@@ -4,3 +4,4 @@ supabase
 storage3
 openpyxl
 matplotlib
+requests
