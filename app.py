@@ -85,29 +85,23 @@ def content_type_from_ext(ext: str) -> str:
     return "image/png" if (ext or "").lower() == ".png" else "image/jpeg"
 
 
-from io import BytesIO
-
 def upload_bytes_to_storage(object_path: str, data_bytes: bytes, content_type: str) -> str:
     """
     Envia bytes para o Supabase Storage e retorna a URL pública.
+    Compatível com storage3 (Streamlit Cloud).
     """
-    # Garantias (evita TypeError de header)
     if not SUPABASE_BUCKET or not isinstance(SUPABASE_BUCKET, str):
         raise ValueError("SUPABASE_BUCKET não definido. Verifique Secrets/ENV no Streamlit Cloud.")
 
-    if not content_type or not isinstance(content_type, str):
-        content_type = "image/jpeg"
+    object_path = (object_path or "").lstrip("/")
 
-    object_path = (object_path or "").lstrip("/")  # não pode começar com /
-
-    file_like = BytesIO(data_bytes)
-
-    # IMPORTANTE: upsert TEM QUE SER string "true"/"false" (não bool)
+    # IMPORTANTÍSSIMO:
+    # aqui o "file" tem que ser BYTES mesmo
     supabase.storage.from_(SUPABASE_BUCKET).upload(
         path=object_path,
-        file=file_like,
+        file=data_bytes,
         file_options={
-            "content-type": str(content_type),
+            "content-type": str(content_type or "image/jpeg"),
             "upsert": "true",
         },
     )
@@ -827,7 +821,7 @@ if menu == "Vistoria":
         if not facade_file:
             st.error("Envie uma foto para salvar.")
         else:
-            img_bytes = facade_file.getbuffer().tobytes()
+            img_bytes = facade_file.getvalue()
             ext = guess_ext(facade_file.name)
             ctype = content_type_from_ext(ext)
             ts = str(int(datetime.now().timestamp() * 1000))
@@ -952,7 +946,7 @@ if menu == "Vistoria":
             else:
                 saved_count = 0
                 for uf in uploaded_files:
-                    img_bytes = uf.getbuffer().tobytes()
+                    img_bytes = uf.getvalue()
                     ext = guess_ext(uf.name)
                     ctype = content_type_from_ext(ext)
                     ts = str(int(datetime.now().timestamp() * 1000))
@@ -1145,4 +1139,5 @@ else:
                 st.error(f"Falha ao gerar ZIP: {e}")
 
                 
+
 
