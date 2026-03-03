@@ -31,9 +31,9 @@ st.set_page_config(
 # ======================
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-SUPABASE_BUCKET = os.getenv("SUPABASE_BUCKET")
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL"))
+SUPABASE_KEY = st.secrets.get("SUPABASE_KEY", os.getenv("SUPABASE_KEY"))
+SUPABASE_BUCKET = st.secrets.get("SUPABASE_BUCKET", os.getenv("SUPABASE_BUCKET"))
 
 if not SUPABASE_URL or not SUPABASE_KEY or not SUPABASE_BUCKET:
     st.error("Faltam variáveis no .env (ou Secrets): SUPABASE_URL, SUPABASE_KEY, SUPABASE_BUCKET")
@@ -1125,4 +1125,5 @@ else:
                     )
             except Exception as e:
                 st.error(f"Falha ao gerar ZIP: {e}")
+
                 
