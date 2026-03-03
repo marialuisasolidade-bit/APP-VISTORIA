@@ -85,15 +85,33 @@ def content_type_from_ext(ext: str) -> str:
     return "image/png" if (ext or "").lower() == ".png" else "image/jpeg"
 
 
+from io import BytesIO
+
 def upload_bytes_to_storage(object_path: str, data_bytes: bytes, content_type: str) -> str:
     """
     Envia bytes para o Supabase Storage e retorna a URL pública.
     """
+    # Garantias (evita TypeError de header)
+    if not SUPABASE_BUCKET or not isinstance(SUPABASE_BUCKET, str):
+        raise ValueError("SUPABASE_BUCKET não definido. Verifique Secrets/ENV no Streamlit Cloud.")
+
+    if not content_type or not isinstance(content_type, str):
+        content_type = "image/jpeg"
+
+    object_path = (object_path or "").lstrip("/")  # não pode começar com /
+
+    file_like = BytesIO(data_bytes)
+
+    # IMPORTANTE: upsert TEM QUE SER string "true"/"false" (não bool)
     supabase.storage.from_(SUPABASE_BUCKET).upload(
         path=object_path,
-        file=data_bytes,
-        file_options={"content-type": content_type, "upsert": True},
+        file=file_like,
+        file_options={
+            "content-type": str(content_type),
+            "upsert": "true",
+        },
     )
+
     return supabase.storage.from_(SUPABASE_BUCKET).get_public_url(object_path)
 
 
@@ -1127,3 +1145,4 @@ else:
                 st.error(f"Falha ao gerar ZIP: {e}")
 
                 
+
