@@ -25,6 +25,59 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+def img_to_base64(path: str) -> str:
+    with open(path, "rb") as f:
+        return base64.b64encode(f.read()).decode("utf-8")
+
+
+LOGO_FILE = "LOGOMARCA.png"
+logo_b64 = img_to_base64(LOGO_FILE) if os.path.exists(LOGO_FILE) else ""
+
+st.markdown(f"""
+<style>
+
+#MainMenu {{ visibility: hidden; }}
+footer {{ visibility: hidden; }}
+
+.block-container {{
+    padding-top: 20px;
+}}
+
+.infra-topbar {{
+    width: 100%;
+    background: #FFFFFF;
+    padding: 30px 0 20px 0;
+    text-align: center;
+}}
+
+.infra-topbar img {{
+    max-width: 150px;
+    width: 80%;
+}}
+
+.infra-title {{
+    margin-top: 18px;
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: #444444;
+}}
+
+.infra-subtitle {{
+    margin-top: 6px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #666666;
+}}
+
+</style>
+
+<div class="infra-topbar">
+    {"<img src='data:image/png;base64," + logo_b64 + "'>" if logo_b64 else ""}
+    <div class="infra-title">SISTEMA DE REGISTRO DE VISTORIA</div>
+    <div class="infra-subtitle">PAREDE DE CONCRETO • CONTROLE TÉCNICO</div>
+</div>
+""", unsafe_allow_html=True)
 
 # ======================
 # SUPABASE
@@ -537,5 +590,6 @@ else:
         ax.axis("equal")
 
         st.pyplot(fig)
+
 
 
