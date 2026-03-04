@@ -206,10 +206,16 @@ def list_blocks(work_id):
 
 def add_apartment(block_id,number):
 
-    supabase.table("apartments").insert({
-        "block_id":block_id,
-        "number":number
-    }).execute()
+    try:
+        supabase.table("apartments").insert({
+            "block_id": block_id,
+            "number": number
+        }).execute()
+
+        return True
+
+    except Exception:
+        return False
 
 
 def list_apartments(block_id):
@@ -533,31 +539,76 @@ if block_choice == "(selecionar)":
 block_id = block_map[block_choice]
 block_name = block_choice
 
-
 # ======================
 # APARTAMENTOS
 # ======================
 
 apartments = list_apartments(block_id)
+
 apt_map = {num:aid for aid,num in apartments}
-   
-    apt_number = st.selectbox(
-        "Apartamento",
-        [""] + list(apt_map.keys())
+
+apt_choice = st.selectbox(
+    "Apartamento",
+    ["(selecionar)", "+ Novo apartamento"] + list(apt_map.keys())
+)
+
+# ======================
+# CRIAR NOVO APARTAMENTO
+# ======================
+
+if apt_choice == "+ Novo apartamento":
+
+    new_apt = st.text_input(
+        "Número do novo apartamento",
+        placeholder="Ex.: 302"
     )
 
-    if not apt_number:
-        st.stop()
+    if st.button("Criar apartamento"):
 
-    apartment_id = apt_map[apt_number]
+        anum = (new_apt or "").strip()
+
+        if not anum:
+            st.warning("Digite o número do apartamento.")
+
+        else:
+
+            ok = add_apartment(block_id, anum)
+
+            if ok:
+                st.success("Apartamento criado com sucesso!")
+                st.rerun()
+
+            else:
+                st.error("Esse apartamento já existe neste bloco.")
+
+    st.stop()
 
 
-    insp = get_or_create_inspection(
-        visit_id,
-        apartment_id
-    )
+# ======================
+# APARTAMENTO NÃO SELECIONADO
+# ======================
 
-    inspection_id = insp[0]
+if apt_choice == "(selecionar)":
+    st.info("Selecione um apartamento ou crie um novo.")
+    st.stop()
+
+
+apartment_id = apt_map[apt_choice]
+
+
+# ======================
+# INSPEÇÃO
+# ======================
+
+insp = get_or_create_inspection(
+    visit_id,
+    apartment_id
+)
+
+inspection_id = insp[0]
+
+
+st.subheader("Espessuras")
 
 
     st.subheader("Espessuras")
@@ -658,6 +709,7 @@ else:
         ax.axis("equal")
 
         st.pyplot(fig)
+
 
 
 
