@@ -129,9 +129,15 @@ def safe_name(text):
 
 def add_company(name):
 
-    supabase.table("companies").insert({
-        "name":name
-    }).execute()
+    try:
+        supabase.table("companies").insert({
+            "name": name
+        }).execute()
+
+        return True
+
+    except Exception:
+        return False
 
 
 def list_companies():
@@ -147,10 +153,16 @@ def list_companies():
 
 def add_work(company_id,name):
 
-    supabase.table("works").insert({
-        "company_id":company_id,
-        "name":name
-    }).execute()
+    try:
+        supabase.table("works").insert({
+            "company_id": company_id,
+            "name": name
+        }).execute()
+
+        return True
+
+    except Exception:
+        return False
 
 
 def list_works(company_id):
@@ -168,10 +180,16 @@ def list_works(company_id):
 
 def add_block(work_id,name):
 
-    supabase.table("blocks").insert({
-        "work_id":work_id,
-        "name":name
-    }).execute()
+    try:
+        supabase.table("blocks").insert({
+            "work_id": work_id,
+            "name": name
+        }).execute()
+
+        return True
+
+    except Exception:
+        return False
 
 
 def list_blocks(work_id):
@@ -351,11 +369,15 @@ if menu == "Cadastro":
 
         if st.button("Salvar empresa"):
 
-            add_company(name)
+            ok = add_company(name)
 
-            st.success("Empresa cadastrada")
-            st.rerun()
+            if ok:
+                st.success("Empresa cadastrada com sucesso!")
+                st.rerun()
 
+            else:
+                st.error("Empresa já cadastrada.")
+        
 
     with tab2:
 
@@ -376,13 +398,14 @@ if menu == "Cadastro":
             
             if st.button("Salvar obra"):
 
-                add_work(
-                    company_map[company_name],
-                    work
-                )
+                ok = add_work(company_id, work)
 
-                st.success("Obra cadastrada")
-                st.rerun()
+                if ok:
+                    st.success("Obra cadastrada!")
+                    st.rerun()
+
+                else:
+                    st.error("Essa obra já existe para essa empresa.")
 
 
 # ======================
@@ -457,24 +480,67 @@ elif menu == "Vistoria":
 
     visit_id = visit_map[visit_choice]
 
+blocks = list_blocks(work_id)
 
-    blocks = list_blocks(work_id)
-    block_map = {name:bid for bid,name in blocks}
+block_map = {name:bid for bid,name in blocks}
 
-    block_name = st.selectbox(
-        "Bloco",
-        [""] + list(block_map.keys())
+block_choice = st.selectbox(
+    "Bloco",
+    ["(selecionar)", "+ Novo bloco"] + list(block_map.keys())
+)
+
+# ======================
+# CRIAR NOVO BLOCO
+# ======================
+
+if block_choice == "+ Novo bloco":
+
+    new_block = st.text_input(
+        "Nome do novo bloco",
+        placeholder="Ex.: Bloco A"
     )
 
-    if not block_name:
-        st.stop()
+    if st.button("Criar bloco"):
 
-    block_id = block_map[block_name]
+        bname = (new_block or "").strip()
+
+        if not bname:
+            st.warning("Digite o nome do bloco.")
+
+        else:
+
+            ok = add_block(work_id, bname)
+
+            if ok:
+                st.success("Bloco criado com sucesso!")
+                st.rerun()
+
+            else:
+                st.error("Esse bloco já existe nesta obra.")
+
+    st.stop()
 
 
-    apartments = list_apartments(block_id)
-    apt_map = {num:aid for aid,num in apartments}
+# ======================
+# BLOCO NÃO SELECIONADO
+# ======================
 
+if block_choice == "(selecionar)":
+    st.info("Selecione um bloco ou crie um novo.")
+    st.stop()
+
+
+block_id = block_map[block_choice]
+block_name = block_choice
+
+
+# ======================
+# APARTAMENTOS
+# ======================
+
+apartments = list_apartments(block_id)
+apt_map = {num:aid for aid,num in apartments}
+   
     apt_number = st.selectbox(
         "Apartamento",
         [""] + list(apt_map.keys())
@@ -592,6 +658,7 @@ else:
         ax.axis("equal")
 
         st.pyplot(fig)
+
 
 
 
