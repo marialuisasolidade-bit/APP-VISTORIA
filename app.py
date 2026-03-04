@@ -346,7 +346,7 @@ if menu == "Cadastro":
     tab1,tab2 = st.tabs(["Empresas","Obras"])
 
     with tab1:
-
+        st.subheader("Cadastrar Empresa")
         name = st.text_input("Nome da empresa")
 
         if st.button("Salvar empresa"):
@@ -369,9 +369,11 @@ if menu == "Cadastro":
         )
 
         if company_name:
-
+            st.subheader("Cadastrar Obra")
+            st.info("Selecione uma empresa para cadastrar uma obra.")
             work = st.text_input("Nome da obra")
 
+            
             if st.button("Salvar obra"):
 
                 add_work(
@@ -590,6 +592,7 @@ else:
         ax.axis("equal")
 
         st.pyplot(fig)
+
 
 
 
