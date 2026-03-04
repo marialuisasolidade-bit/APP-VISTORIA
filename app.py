@@ -122,6 +122,248 @@ def safe_name(text):
     text = re.sub(r"[^A-Za-z0-9_\-]", "", text)
     return text[:80]
 
+# ======================
+# SUPABASE STORAGE + EXPORT HELPERS
+# (Cole aqui logo após safe_name)
+# ======================
+
+def guess_ext(filename: str) -> str:
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext in [".jpg", ".jpeg", ".png"]:
+        return ext
+    return ".jpg"
+
+
+def content_type_from_ext(ext: str) -> str:
+    return "image/png" if (ext or "").lower() == ".png" else "image/jpeg"
+
+
+def upload_bytes_to_storage(object_path: str, data_bytes: bytes, content_type: str) -> str:
+    if not SUPABASE_BUCKET or not isinstance(SUPABASE_BUCKET, str):
+        raise ValueError("SUPABASE_BUCKET não definido. Verifique Secrets/ENV.")
+
+    object_path = (object_path or "").lstrip("/")
+
+    supabase.storage.from_(SUPABASE_BUCKET).upload(
+        path=object_path,
+        file=data_bytes,  # BYTES
+        file_options={
+            "content-type": str(content_type or "image/jpeg"),
+            "upsert": "true",
+        },
+    )
+
+    return supabase.storage.from_(SUPABASE_BUCKET).get_public_url(object_path)
+
+
+def storage_key_for_facade(company_name: str, work_name: str, block_name: str, ts: str, ext: str) -> str:
+    return (
+        f"fachadas/"
+        f"{safe_name(company_name)}/"
+        f"{safe_name(work_name)}/"
+        f"{safe_name(block_name)}/"
+        f"FACHADA_{safe_name(block_name)}_{ts}{ext}"
+    )
+
+
+def storage_key_for_pathology(company_name: str, work_name: str, visit_choice: str,
+                              block_name: str, apt_number: str, pathology_type: str,
+                              pid_or_ts: str, ext: str) -> str:
+    return (
+        f"patologias/"
+        f"{safe_name(company_name)}/"
+        f"{safe_name(work_name)}/"
+        f"{safe_name(visit_choice)}/"
+        f"{safe_name(pathology_type)}/"
+        f"{safe_name(block_name)}_{safe_name(apt_number)}_{pid_or_ts}{ext}"
+    )
+
+
+def storage_key_from_public_url(public_url: str) -> str | None:
+    if not public_url or not isinstance(public_url, str):
+        return None
+    if not public_url.startswith("http"):
+        return None
+    try:
+        u = urlparse(public_url)
+        marker = f"/storage/v1/object/public/{SUPABASE_BUCKET}/"
+        idx = u.path.find(marker)
+        if idx == -1:
+            return None
+        return u.path[idx + len(marker):].lstrip("/")
+    except Exception:
+        return None
+
+
+def is_url(s: str) -> bool:
+    return isinstance(s, str) and s.startswith("http")
+
+
+# ======================
+# FACHADAS (DB - SUPABASE)
+# ======================
+
+def get_block_facade(block_id: int):
+    r = supabase.table("block_facades").select("*").eq("block_id", block_id).limit(1).execute()
+    if not r.data:
+        return None
+    x = r.data[0]
+    return (x.get("photo_path"), x.get("created_at"))
+
+
+def upsert_block_facade(block_id: int, photo_url: str):
+    # upsert via "block_id" (precisa ter UNIQUE no banco)
+    supabase.table("block_facades").upsert(
+        {"block_id": block_id, "photo_path": photo_url, "created_at": now_iso()},
+        on_conflict="block_id"
+    ).execute()
+
+
+# ======================
+# XLSX - 4 colunas (Bloco, Apartamento, Local, Espessura)
+# ======================
+
+def build_measures_xlsx(visit_id: int) -> bytes:
+    r = supabase.table("inspections").select(
+        "id, thickness1, thickness2, thickness3, thickness1_room, thickness2_room, thickness3_room, "
+        "apartments(number, blocks(name))"
+    ).eq("visit_id", visit_id).execute()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Espessuras"
+    ws.append(["Bloco", "Apartamento", "Local", "Espessura (mm)"])
+
+    if r.data:
+        for row in r.data:
+            apt = row.get("apartments") or {}
+            apt_number = apt.get("number") or ""
+            blk = (apt.get("blocks") or {})
+            bloco = blk.get("name") or ""
+
+            # quebra em linhas (uma por medida preenchida)
+            if row.get("thickness1") is not None:
+                ws.append([bloco, apt_number, row.get("thickness1_room") or "", float(row["thickness1"])])
+            if row.get("thickness2") is not None:
+                ws.append([bloco, apt_number, row.get("thickness2_room") or "", float(row["thickness2"])])
+            if row.get("thickness3") is not None:
+                ws.append([bloco, apt_number, row.get("thickness3_room") or "", float(row["thickness3"])])
+
+    bio = BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
+# ======================
+# ZIP - Patologias
+# ======================
+
+def build_pathologies_zip(visit_id: int) -> bytes:
+    r = supabase.table("pathology_photos").select(
+        "id, pathology_type, photo_path, "
+        "inspections(visit_id, apartments(number, blocks(name)))"
+    ).execute()
+
+    # filtra apenas as do visit_id (porque o select aninhado vem tudo)
+    rows = []
+    for p in (r.data or []):
+        insp = p.get("inspections") or {}
+        if insp.get("visit_id") != visit_id:
+            continue
+        apt = (insp.get("apartments") or {})
+        apto = apt.get("number") or ""
+        bloco = (apt.get("blocks") or {}).get("name") or ""
+        rows.append((p["id"], p["pathology_type"], p["photo_path"], bloco, apto))
+
+    bio = BytesIO()
+    with zipfile.ZipFile(bio, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+        if not rows:
+            z.writestr("LEIA-ME.txt", "Nenhuma patologia cadastrada nesta vistoria.")
+            return bio.getvalue()
+
+        for pid, ptype, url, bloco, apto in rows:
+            folder = safe_name(ptype)
+            bloco_safe = safe_name(str(bloco))
+            apto_safe = safe_name(str(apto))
+
+            ext = os.path.splitext(url or "")[1].lower()
+            if ext not in [".jpg", ".jpeg", ".png"]:
+                ext = ".jpg"
+
+            arcname = f"Patologias/{folder}/{bloco_safe}_{apto_safe}_{pid}{ext}"
+
+            try:
+                if is_url(url):
+                    object_key = storage_key_from_public_url(url)
+                    if not object_key:
+                        z.writestr(f"Patologias/{folder}/URL_INVALIDA_{pid}.txt", f"URL: {url}")
+                    else:
+                        file_bytes = supabase.storage.from_(SUPABASE_BUCKET).download(object_key)
+                        z.writestr(arcname, file_bytes)
+                else:
+                    z.writestr(f"Patologias/{folder}/SEM_URL_{pid}.txt", f"Valor: {url}")
+            except Exception as e:
+                z.writestr(f"Patologias/{folder}/FALHA_{pid}.txt", f"URL: {url}\nErro: {e}")
+
+    return bio.getvalue()
+
+
+# ======================
+# ZIP - Fachadas
+# ======================
+
+def build_facades_zip(visit_id: int) -> bytes:
+    # pega blocos envolvidos na vistoria
+    insp = supabase.table("inspections").select(
+        "id, apartments(block_id, blocks(name))"
+    ).eq("visit_id", visit_id).execute()
+
+    block_ids = set()
+    block_names = {}
+    for row in (insp.data or []):
+        apt = row.get("apartments") or {}
+        bid = apt.get("block_id")
+        if bid:
+            block_ids.add(bid)
+            block_names[bid] = (apt.get("blocks") or {}).get("name") or ""
+
+    if not block_ids:
+        bio = BytesIO()
+        with zipfile.ZipFile(bio, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+            z.writestr("LEIA-ME.txt", "Nenhum bloco encontrado nesta vistoria.")
+        return bio.getvalue()
+
+    fac = supabase.table("block_facades").select("*").in_("block_id", list(block_ids)).execute()
+
+    bio = BytesIO()
+    with zipfile.ZipFile(bio, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+        if not fac.data:
+            z.writestr("LEIA-ME.txt", "Nenhuma fachada cadastrada para os blocos desta vistoria.")
+            return bio.getvalue()
+
+        for f in fac.data:
+            bid = f.get("block_id")
+            url = f.get("photo_path")
+            bloco = block_names.get(bid, str(bid))
+            bloco_safe = safe_name(bloco)
+
+            ext = os.path.splitext(url or "")[1].lower()
+            if ext not in [".jpg", ".jpeg", ".png"]:
+                ext = ".jpg"
+
+            arcname = f"Fachadas/FACHADA_{bloco_safe}{ext}"
+
+            try:
+                object_key = storage_key_from_public_url(url) if is_url(url) else None
+                if not object_key:
+                    z.writestr(f"Fachadas/URL_INVALIDA_{bloco_safe}.txt", f"URL: {url}")
+                else:
+                    file_bytes = supabase.storage.from_(SUPABASE_BUCKET).download(object_key)
+                    z.writestr(arcname, file_bytes)
+            except Exception as e:
+                z.writestr(f"Fachadas/FALHA_{bloco_safe}.txt", f"URL: {url}\nErro: {e}")
+
+    return bio.getvalue()
 
 # ======================
 # EMPRESAS
@@ -398,12 +640,12 @@ if menu == "Cadastro":
 
         if company_name:
             st.subheader("Cadastrar Obra")
-            st.info("Selecione uma empresa para cadastrar uma obra.")
+            st.caption("Selecione uma empresa para cadastrar uma obra.")
             work = st.text_input("Nome da obra")
 
             
             if st.button("Salvar obra"):
-
+                company_id = company_map[company_name]
                 ok = add_work(company_id, work)
 
                 if ok:
@@ -540,6 +782,57 @@ block_id = block_map[block_choice]
 block_name = block_choice
 
 # ======================
+# FACHADA DO BLOCO
+# ======================
+st.subheader("Fachada do Bloco")
+
+facade_row = get_block_facade(block_id)
+if facade_row:
+    facade_url, facade_created = facade_row
+    st.caption(f"Última foto cadastrada: {facade_created}")
+    if facade_url:
+        st.image(facade_url, width=520)
+
+facade_file = st.file_uploader(
+    "Enviar/Atualizar foto da fachada do bloco",
+    type=["jpg", "jpeg", "png"],
+    accept_multiple_files=False,
+    key=f"facade_{block_id}"
+)
+
+if st.button("Salvar foto da fachada", key=f"save_facade_{block_id}"):
+
+    if not facade_file:
+        st.error("Envie uma foto para salvar.")
+        st.stop()
+
+    try:
+        # bytes da imagem (mais compatível no Streamlit Cloud)
+        img_bytes = facade_file.getvalue()
+
+       
+        ext = guess_ext(facade_file.name)
+        ctype = content_type_from_ext(ext)
+        ts = str(int(datetime.now().timestamp() * 1000))
+
+        # caminho no bucket (sem caracteres inválidos)
+        object_path = storage_key_for_facade(company_name, work_name, block_name, ts, ext)
+
+        # upload no Storage -> retorna URL pública
+        public_url = upload_bytes_to_storage(object_path, img_bytes, ctype)
+
+        # salva URL no SQLite (block_facades)
+        upsert_block_facade(block_id, public_url)
+
+        st.success("Foto da fachada salva com sucesso!")
+        st.rerun()
+
+    except Exception as e:
+        st.error(f"Erro ao salvar fachada: {e}")
+
+st.divider()
+
+# ======================
 # APARTAMENTOS
 # ======================
 
@@ -593,118 +886,370 @@ if apt_choice == "(selecionar)":
     st.stop()
 
 
-apartment_id = apt_map[apt_choice]
+apt_number = apt_choice
 
 
 # ======================
 # INSPEÇÃO
 # ======================
 
-    insp = get_or_create_inspection(
-        visit_id,
-        apartment_id
-    )
-    
-    inspection_id = insp[0]
+insp = get_or_create_inspection(visit_id, apartment_id)
 
-    st.subheader("Espessuras")
+inspection_id, created_at, t1, t2, t3, r1, r2, r3, notes = insp
 
-    v1 = st.text_input("Espessura 1")
-    v2 = st.text_input("Espessura 2")
-    v3 = st.text_input("Espessura 3")
+st.success(f"Contexto: {company_name} • {work_name} • {visit_choice} • {block_name} • Apto {apt_number}")
+st.caption(f"Inspeção ID: {inspection_id} | Criada em: {created_at}")
 
-    if st.button("Salvar vistoria"):
+st.divider()
 
-        update_inspection(
-            inspection_id,
-            safe_float(v1),
-            safe_float(v2),
-            safe_float(v3),
-            "",
-            "",
-            "",
-            ""
+ROOMS = [
+    "Sala",
+    "Cozinha",
+    "Banheiro",
+    "Basculante",
+    "Quarto Solteiro",
+    "Quarto Casal",
+    "Cozinha - Janela",
+    "Varanda",
+    "Quarto Solteiro - Janela",
+    "Quarto Casal - Janela",
+    "Outro"
+]
+
+
+def room_index(value):
+    if value in ROOMS:
+        return ROOMS.index(value)
+    return 0
+
+
+def fix_room(selected, other):
+    if selected == "Outro":
+        return (other or "").strip() or "Outro"
+    return selected
+
+
+col1, col2 = st.columns(2)
+
+# ======================
+# ESPESSURAS
+# ======================
+
+with col1:
+
+    st.subheader("Espessuras (mm) + Local")
+
+    with st.form("form_medidas", clear_on_submit=False):
+
+        v1 = st.text_input(
+            "Espessura 1 (mm)",
+            value="" if t1 is None else str(t1)
         )
 
-        st.success("Salvo")
+        loc1_sel = st.selectbox(
+            "Local - Espessura 1",
+            ROOMS,
+            index=room_index(r1)
+        )
 
 
-# ======================
-# EXPORTAÇÕES
-# ======================
+        v2 = st.text_input(
+            "Espessura 2 (mm)",
+            value="" if t2 is None else str(t2)
+        )
 
-else:
+        loc2_sel = st.selectbox(
+            "Local - Espessura 2",
+            ROOMS,
+            index=room_index(r2)
+        )
 
-    st.header("EXPORTAÇÕES")
 
-    companies = list_companies()
-    company_map = {name:cid for cid,name in companies}
+        v3 = st.text_input(
+            "Espessura 3 (mm)",
+            value="" if t3 is None else str(t3)
+        )
 
-    company_name = st.selectbox(
-        "Empresa",
-        [""] + list(company_map.keys())
+        loc3_sel = st.selectbox(
+            "Local - Espessura 3",
+            ROOMS,
+            index=room_index(r3)
+        )
+
+
+        other_room = st.text_input(
+            "Se escolher 'Outro', escreva aqui",
+            placeholder="Ex.: Hall / Área de serviço"
+        )
+
+
+        notes_in = st.text_area(
+            "Observações",
+            value=notes or "",
+            height=120
+        )
+
+
+        submitted = st.form_submit_button("Salvar vistoria")
+
+
+    loc1 = fix_room(loc1_sel, other_room)
+    loc2 = fix_room(loc2_sel, other_room)
+    loc3 = fix_room(loc3_sel, other_room)
+
+
+    if submitted:
+
+        n1 = safe_float(v1)
+        n2 = safe_float(v2)
+        n3 = safe_float(v3)
+
+        if n1 is None or n2 is None or n3 is None:
+
+            st.error("Preencha as 3 espessuras com números válidos.")
+
+        else:
+
+            update_inspection(
+                inspection_id,
+                n1,
+                n2,
+                n3,
+                loc1,
+                loc2,
+                loc3,
+                notes_in
+            )
+
+            st.success("Vistoria salva com sucesso!")
+
+            st.rerun()
+
+with col2:
+    st.subheader("Patologias")
+
+    PATHOLOGIES = [
+        "Fissura", "Aresta", "Armadura aparente", "Armadura deslocada", "Segregação",
+        "Desvio de planicidade", "Juntas de concretagem", "Espaçador deslocado",
+        "Espaçador rotacionado", "Eletroduto aparente", "Material contaminado",
+        "Forma suja", "Outro"
+    ]
+
+    pathology_type = st.selectbox("Tipo de patologia", PATHOLOGIES, key="ptype")
+    comment = st.text_input("Comentário (opcional)", placeholder="Ex.: escada para 1° andar", key="pcomment")
+
+    # usado para "resetar" o uploader depois de salvar (evita acumular)
+    if "uploader_reset" not in st.session_state:
+        st.session_state.uploader_reset = 0
+
+    uploaded_files = st.file_uploader(
+        "Enviar foto(s)",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True,
+        key=f"pfiles_{st.session_state.uploader_reset}"
     )
 
-    if not company_name:
-        st.stop()
+    if st.button("Salvar patologia(s)", key=f"btn_save_path_{inspection_id}"):
 
+        if not uploaded_files:
+            st.error("Envie pelo menos 1 foto.")
+            st.stop()
+
+        try:
+            saved_count = 0
+            base_ts = str(int(datetime.now().timestamp() * 1000))
+
+            for idx, uf in enumerate(uploaded_files, start=1):
+                # bytes (compatível com Streamlit Cloud)
+                img_bytes = uf.getvalue()
+
+                ext = guess_ext(uf.name)
+                ctype = content_type_from_ext(ext)
+
+                # id único por arquivo (evita sobrescrever e evita duplicar nome)
+                photo_id = f"{base_ts}_{idx}"
+
+                object_path = storage_key_for_pathology(
+                    company_name, work_name, visit_choice,
+                    block_name, apt_number, pathology_type,
+                    photo_id, ext
+                )
+
+                public_url = upload_bytes_to_storage(object_path, img_bytes, ctype)
+
+                # grava no SQLite a URL pública
+                add_pathology(inspection_id, pathology_type, comment, public_url)
+                saved_count += 1
+
+            st.success(f"{saved_count} foto(s) salva(s) no Supabase!")
+            st.session_state.uploader_reset += 1
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"Erro ao salvar patologia(s): {e}")
+
+    st.divider()
+    st.subheader("Patologias registradas (este apartamento / esta data)")
+
+    registros = list_pathologies(inspection_id)
+    if not registros:
+        st.info("Nenhuma patologia cadastrada.")
+    else:
+        for pid, ptype, pcomment, purl, pdate in registros:
+            st.write(f"**{ptype}** - {pcomment or 'Sem comentário'} - {pdate}")
+            if purl:
+                st.image(purl, width=320)
+
+
+# ======================
+# EXPORTAÇÕES  (cole NO LUGAR do seu bloco "else: st.header('EXPORTAÇÕES') ...")
+# ======================
+else:
+    st.header("EXPORTAÇÕES")
+    st.caption("Baixe a planilha (espessuras) e os ZIPs separados: Patologias e Fachadas.")
+
+    # Empresa
+    companies = list_companies()
+    company_map = {name: cid for cid, name in companies}
+
+    company_name = st.selectbox("Empresa", ["(selecionar)"] + list(company_map.keys()), key="exp_company")
+    if company_name == "(selecionar)":
+        st.stop()
     company_id = company_map[company_name]
 
-
+    # Obra
     works = list_works(company_id)
-    work_map = {name:wid for wid,name in works}
+    work_map = {name: wid for wid, name in works}
 
-    work_name = st.selectbox(
-        "Obra",
-        [""] + list(work_map.keys())
-    )
-
-    if not work_name:
+    work_name = st.selectbox("Obra", ["(selecionar)"] + list(work_map.keys()), key="exp_work")
+    if work_name == "(selecionar)":
         st.stop()
-
     work_id = work_map[work_name]
 
-
+    # Vistoria
     visits = list_visits(work_id)
+    if not visits:
+        st.info("Nenhuma vistoria cadastrada nessa obra ainda.")
+        st.stop()
 
     visit_labels = []
     visit_map = {}
-
-    for vid,vdate,vtitle in visits:
-
-        label = f"{vdate} - {vtitle}"
-
+    for vid, vdate, vtitle in visits:
+        label = f"{vdate}" if not (vtitle or "").strip() else f"{vdate} - {vtitle}"
         visit_labels.append(label)
         visit_map[label] = vid
 
-
-    visit_choice = st.selectbox(
-        "Vistoria",
-        visit_labels
-    )
-
+    visit_choice = st.selectbox("Vistoria (data)", visit_labels, key="exp_visit")
     visit_id = visit_map[visit_choice]
 
+    # ============================
+    # GRÁFICO (Patologias)
+    # ============================
+    st.divider()
+    st.subheader("Análise da vistoria")
 
     stats = get_pathology_stats(visit_id)
-
-    if stats:
-
+    if not stats:
+        st.info("Nenhuma patologia registrada nesta vistoria.")
+    else:
         labels = [x[0] for x in stats]
         values = [x[1] for x in stats]
+        total = sum(values)
+        st.caption(f"Total de registros (fotos): {total}")
 
-        fig,ax = plt.subplots(figsize=(4,4),dpi=150)
-
-        ax.pie(
+        fig, ax = plt.subplots(figsize=(4.2, 4.2), dpi=160)
+        wedges, texts, autotexts = ax.pie(
             values,
             labels=labels,
             autopct="%1.1f%%",
-            startangle=90
+            startangle=90,
+            textprops={"fontsize": 7},
         )
-
+        for t in texts:
+            t.set_fontsize(7)
+        for a in autotexts:
+            a.set_fontsize(7)
         ax.axis("equal")
+        plt.tight_layout()
+        st.pyplot(fig, use_container_width=False)
 
-        st.pyplot(fig)
+    # ============================
+    # DOWNLOADS
+    # ============================
+    st.divider()
+    st.subheader("Downloads")
+
+    colA, colB, colC = st.columns(3)
+
+    # 1) XLSX Espessuras (4 colunas)
+    with colA:
+        st.caption("Planilha de espessuras")
+        if st.button("Gerar planilha (.xlsx)", key=f"btn_xlsx_{visit_id}"):
+            try:
+                xlsx_bytes = build_measures_xlsx(visit_id)
+                fname = (
+                    f"Espessuras_{safe_name(company_name)}_"
+                    f"{safe_name(work_name)}_{safe_name(visit_choice)}_"
+                    f"{int(datetime.now().timestamp())}.xlsx"
+                )
+                st.download_button(
+                    "Baixar planilha",
+                    data=xlsx_bytes,
+                    file_name=fname,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_xlsx_{visit_id}",
+                )
+            except Exception as e:
+                st.error(f"Falha ao gerar planilha: {e}")
+
+    # 2) ZIP Patologias
+    with colB:
+        st.caption("ZIP - Patologias (fotos)")
+        if st.button("Gerar ZIP Patologias", key=f"btn_zip_pat_{visit_id}"):
+            try:
+                zip_bytes = build_pathologies_zip(visit_id)
+                if not isinstance(zip_bytes, (bytes, bytearray)):
+                    st.error("Falha: ZIP Patologias não retornou bytes.")
+                else:
+                    fname = (
+                        f"Patologias_{safe_name(company_name)}_"
+                        f"{safe_name(work_name)}_{safe_name(visit_choice)}_"
+                        f"{int(datetime.now().timestamp())}.zip"
+                    )
+                    st.download_button(
+                        "Baixar ZIP Patologias",
+                        data=zip_bytes,
+                        file_name=fname,
+                        mime="application/zip",
+                        key=f"dl_zip_pat_{visit_id}",
+                    )
+            except Exception as e:
+                st.error(f"Falha ao gerar ZIP Patologias: {e}")
+
+    # 3) ZIP Fachadas
+    with colC:
+        st.caption("ZIP - Fachadas (fotos)")
+        if st.button("Gerar ZIP Fachadas", key=f"btn_zip_fac_{visit_id}"):
+            try:
+                zip_bytes = build_facades_zip(visit_id)
+                if not isinstance(zip_bytes, (bytes, bytearray)):
+                    st.error("Falha: ZIP Fachadas não retornou bytes.")
+                else:
+                    fname = (
+                        f"Fachadas_{safe_name(company_name)}_"
+                        f"{safe_name(work_name)}_{safe_name(visit_choice)}_"
+                        f"{int(datetime.now().timestamp())}.zip"
+                    )
+                    st.download_button(
+                        "Baixar ZIP Fachadas",
+                        data=zip_bytes,
+                        file_name=fname,
+                        mime="application/zip",
+                        key=f"dl_zip_fac_{visit_id}",
+                    )
+            except Exception as e:
+                st.error(f"Falha ao gerar ZIP Fachadas: {e}")
+
 
 
 
