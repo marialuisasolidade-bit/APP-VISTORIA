@@ -600,16 +600,12 @@ apartment_id = apt_map[apt_choice]
 # INSPEÇÃO
 # ======================
 
-insp = get_or_create_inspection(
-    visit_id,
-    apartment_id
-)
-
-inspection_id = insp[0]
-
-
-st.subheader("Espessuras")
-
+    insp = get_or_create_inspection(
+        visit_id,
+        apartment_id
+    )
+    
+    inspection_id = insp[0]
 
     st.subheader("Espessuras")
 
@@ -709,6 +705,7 @@ else:
         ax.axis("equal")
 
         st.pyplot(fig)
+
 
 
 
