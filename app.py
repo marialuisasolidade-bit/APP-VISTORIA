@@ -20,7 +20,7 @@ from supabase import create_client
 # ======================
 
 st.set_page_config(
-    page_title="Vistoria Concreto",
+    page_title="VISTORIA",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -341,7 +341,7 @@ menu = st.sidebar.radio(
 
 if menu == "Cadastro":
 
-    st.header("Cadastro")
+    st.header("CADASTRO")
 
     tab1,tab2 = st.tabs(["Empresas","Obras"])
 
@@ -389,7 +389,7 @@ if menu == "Cadastro":
 
 elif menu == "Vistoria":
 
-    st.header("Vistoria")
+    st.header("VISTORIA")
 
     companies = list_companies()
     company_map = {name:cid for cid,name in companies}
@@ -520,7 +520,7 @@ elif menu == "Vistoria":
 
 else:
 
-    st.header("Exportações")
+    st.header("EXPORTAÇÕES")
 
     companies = list_companies()
     company_map = {name:cid for cid,name in companies}
@@ -590,6 +590,7 @@ else:
         ax.axis("equal")
 
         st.pyplot(fig)
+
 
 
 
