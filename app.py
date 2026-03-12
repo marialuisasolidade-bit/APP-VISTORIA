@@ -884,11 +884,10 @@ elif menu == "Vistoria":
     if apt_choice == "(selecionar)":
         st.info("Selecione um apartamento ou crie um novo.")
         st.stop()
-    
-    
+
     apt_number = apt_choice
-    
-    
+    apartment_id = apt_map[apt_choice]
+ 
     # ======================
     # INSPEÇÃO
     # ======================
@@ -1249,6 +1248,7 @@ else:
                     )
             except Exception as e:
                 st.error(f"Falha ao gerar ZIP Fachadas: {e}")
+
 
 
 
