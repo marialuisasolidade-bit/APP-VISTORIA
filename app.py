@@ -1102,7 +1102,7 @@ with col2:
 
 
 # ======================
-# EXPORTAÇÕES  (cole NO LUGAR do seu bloco "else: st.header('EXPORTAÇÕES') ...")
+# EXPORTAÇÕES  (cole NO UGAR do seu bloco "else: st.header('EXPORTAÇÕES') ...")
 # ======================
 else:
     st.header("EXPORTAÇÕES")
@@ -1249,6 +1249,7 @@ else:
                     )
             except Exception as e:
                 st.error(f"Falha ao gerar ZIP Fachadas: {e}")
+
 
 
 
