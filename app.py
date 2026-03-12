@@ -728,383 +728,383 @@ elif menu == "Vistoria":
 
     visit_id = visit_map[visit_choice]
 
-blocks = list_blocks(work_id)
-
-block_map = {name:bid for bid,name in blocks}
-
-block_choice = st.selectbox(
-    "Bloco",
-    ["(selecionar)", "+ Novo bloco"] + list(block_map.keys())
-)
-
-# ======================
-# CRIAR NOVO BLOCO
-# ======================
-
-if block_choice == "+ Novo bloco":
-
-    new_block = st.text_input(
-        "Nome do novo bloco",
-        placeholder="Ex.: Bloco A"
+    blocks = list_blocks(work_id)
+    
+    block_map = {name:bid for bid,name in blocks}
+    
+    block_choice = st.selectbox(
+        "Bloco",
+        ["(selecionar)", "+ Novo bloco"] + list(block_map.keys())
     )
-
-    if st.button("Criar bloco"):
-
-        bname = (new_block or "").strip()
-
-        if not bname:
-            st.warning("Digite o nome do bloco.")
-
-        else:
-
-            ok = add_block(work_id, bname)
-
-            if ok:
-                st.success("Bloco criado com sucesso!")
-                st.rerun()
-
+    
+    # ======================
+    # CRIAR NOVO BLOCO
+    # ======================
+    
+    if block_choice == "+ Novo bloco":
+    
+        new_block = st.text_input(
+            "Nome do novo bloco",
+            placeholder="Ex.: Bloco A"
+        )
+    
+        if st.button("Criar bloco"):
+    
+            bname = (new_block or "").strip()
+    
+            if not bname:
+                st.warning("Digite o nome do bloco.")
+    
             else:
-                st.error("Esse bloco já existe nesta obra.")
-
-    st.stop()
-
-
-# ======================
-# BLOCO NÃO SELECIONADO
-# ======================
-
-if block_choice == "(selecionar)":
-    st.info("Selecione um bloco ou crie um novo.")
-    st.stop()
-
-
-block_id = block_map[block_choice]
-block_name = block_choice
-
-# ======================
-# FACHADA DO BLOCO
-# ======================
-st.subheader("Fachada do Bloco")
-
-facade_row = get_block_facade(block_id)
-if facade_row:
-    facade_url, facade_created = facade_row
-    st.caption(f"Última foto cadastrada: {facade_created}")
-    if facade_url:
-        st.image(facade_url, width=520)
-
-facade_file = st.file_uploader(
-    "Enviar/Atualizar foto da fachada do bloco",
-    type=["jpg", "jpeg", "png"],
-    accept_multiple_files=False,
-    key=f"facade_{block_id}"
-)
-
-if st.button("Salvar foto da fachada", key=f"save_facade_{block_id}"):
-
-    if not facade_file:
-        st.error("Envie uma foto para salvar.")
+    
+                ok = add_block(work_id, bname)
+    
+                if ok:
+                    st.success("Bloco criado com sucesso!")
+                    st.rerun()
+    
+                else:
+                    st.error("Esse bloco já existe nesta obra.")
+    
         st.stop()
-
-    try:
-        # bytes da imagem (mais compatível no Streamlit Cloud)
-        img_bytes = facade_file.getvalue()
-
-       
-        ext = guess_ext(facade_file.name)
-        ctype = content_type_from_ext(ext)
-        ts = str(int(datetime.now().timestamp() * 1000))
-
-        # caminho no bucket (sem caracteres inválidos)
-        object_path = storage_key_for_facade(company_name, work_name, block_name, ts, ext)
-
-        # upload no Storage -> retorna URL pública
-        public_url = upload_bytes_to_storage(object_path, img_bytes, ctype)
-
-        # salva URL no SQLite (block_facades)
-        upsert_block_facade(block_id, public_url)
-
-        st.success("Foto da fachada salva com sucesso!")
-        st.rerun()
-
-    except Exception as e:
-        st.error(f"Erro ao salvar fachada: {e}")
-
-st.divider()
-
-# ======================
-# APARTAMENTOS
-# ======================
-
-apartments = list_apartments(block_id)
-
-apt_map = {num:aid for aid,num in apartments}
-
-apt_choice = st.selectbox(
-    "Apartamento",
-    ["(selecionar)", "+ Novo apartamento"] + list(apt_map.keys())
-)
-
-# ======================
-# CRIAR NOVO APARTAMENTO
-# ======================
-
-if apt_choice == "+ Novo apartamento":
-
-    new_apt = st.text_input(
-        "Número do novo apartamento",
-        placeholder="Ex.: 302"
-    )
-
-    if st.button("Criar apartamento"):
-
-        anum = (new_apt or "").strip()
-
-        if not anum:
-            st.warning("Digite o número do apartamento.")
-
-        else:
-
-            ok = add_apartment(block_id, anum)
-
-            if ok:
-                st.success("Apartamento criado com sucesso!")
-                st.rerun()
-
-            else:
-                st.error("Esse apartamento já existe neste bloco.")
-
-    st.stop()
-
-
-# ======================
-# APARTAMENTO NÃO SELECIONADO
-# ======================
-
-if apt_choice == "(selecionar)":
-    st.info("Selecione um apartamento ou crie um novo.")
-    st.stop()
-
-
-apt_number = apt_choice
-
-
-# ======================
-# INSPEÇÃO
-# ======================
-
-insp = get_or_create_inspection(visit_id, apartment_id)
-
-inspection_id, created_at, t1, t2, t3, r1, r2, r3, notes = insp
-
-st.success(f"Contexto: {company_name} • {work_name} • {visit_choice} • {block_name} • Apto {apt_number}")
-st.caption(f"Inspeção ID: {inspection_id} | Criada em: {created_at}")
-
-st.divider()
-
-ROOMS = [
-    "Sala",
-    "Cozinha",
-    "Banheiro",
-    "Basculante",
-    "Quarto Solteiro",
-    "Quarto Casal",
-    "Cozinha - Janela",
-    "Varanda",
-    "Quarto Solteiro - Janela",
-    "Quarto Casal - Janela",
-    "Outro"
-]
-
-
-def room_index(value):
-    if value in ROOMS:
-        return ROOMS.index(value)
-    return 0
-
-
-def fix_room(selected, other):
-    if selected == "Outro":
-        return (other or "").strip() or "Outro"
-    return selected
-
-
-col1, col2 = st.columns(2)
-
-# ======================
-# ESPESSURAS
-# ======================
-
-with col1:
-
-    st.subheader("Espessuras (mm) + Local")
-
-    with st.form("form_medidas", clear_on_submit=False):
-
-        v1 = st.text_input(
-            "Espessura 1 (mm)",
-            value="" if t1 is None else str(t1)
-        )
-
-        loc1_sel = st.selectbox(
-            "Local - Espessura 1",
-            ROOMS,
-            index=room_index(r1)
-        )
-
-
-        v2 = st.text_input(
-            "Espessura 2 (mm)",
-            value="" if t2 is None else str(t2)
-        )
-
-        loc2_sel = st.selectbox(
-            "Local - Espessura 2",
-            ROOMS,
-            index=room_index(r2)
-        )
-
-
-        v3 = st.text_input(
-            "Espessura 3 (mm)",
-            value="" if t3 is None else str(t3)
-        )
-
-        loc3_sel = st.selectbox(
-            "Local - Espessura 3",
-            ROOMS,
-            index=room_index(r3)
-        )
-
-
-        other_room = st.text_input(
-            "Se escolher 'Outro', escreva aqui",
-            placeholder="Ex.: Hall / Área de serviço"
-        )
-
-
-        notes_in = st.text_area(
-            "Observações",
-            value=notes or "",
-            height=120
-        )
-
-
-        submitted = st.form_submit_button("Salvar vistoria")
-
-
-    loc1 = fix_room(loc1_sel, other_room)
-    loc2 = fix_room(loc2_sel, other_room)
-    loc3 = fix_room(loc3_sel, other_room)
-
-
-    if submitted:
-
-        n1 = safe_float(v1)
-        n2 = safe_float(v2)
-        n3 = safe_float(v3)
-
-        if n1 is None or n2 is None or n3 is None:
-
-            st.error("Preencha as 3 espessuras com números válidos.")
-
-        else:
-
-            update_inspection(
-                inspection_id,
-                n1,
-                n2,
-                n3,
-                loc1,
-                loc2,
-                loc3,
-                notes_in
-            )
-
-            st.success("Vistoria salva com sucesso!")
-
-            st.rerun()
-
-with col2:
-    st.subheader("Patologias")
-
-    PATHOLOGIES = [
-        "Fissura", "Aresta", "Armadura aparente", "Armadura deslocada", "Segregação",
-        "Desvio de planicidade", "Juntas de concretagem", "Espaçador deslocado",
-        "Espaçador rotacionado", "Eletroduto aparente", "Material contaminado",
-        "Forma suja", "Outro"
-    ]
-
-    pathology_type = st.selectbox("Tipo de patologia", PATHOLOGIES, key="ptype")
-    comment = st.text_input("Comentário (opcional)", placeholder="Ex.: escada para 1° andar", key="pcomment")
-
-    # usado para "resetar" o uploader depois de salvar (evita acumular)
-    if "uploader_reset" not in st.session_state:
-        st.session_state.uploader_reset = 0
-
-    uploaded_files = st.file_uploader(
-        "Enviar foto(s)",
+    
+    
+    # ======================
+    # BLOCO NÃO SELECIONADO
+    # ======================
+    
+    if block_choice == "(selecionar)":
+        st.info("Selecione um bloco ou crie um novo.")
+        st.stop()
+    
+    
+    block_id = block_map[block_choice]
+    block_name = block_choice
+    
+    # ======================
+    # FACHADA DO BLOCO
+    # ======================
+    st.subheader("Fachada do Bloco")
+    
+    facade_row = get_block_facade(block_id)
+    if facade_row:
+        facade_url, facade_created = facade_row
+        st.caption(f"Última foto cadastrada: {facade_created}")
+        if facade_url:
+            st.image(facade_url, width=520)
+    
+    facade_file = st.file_uploader(
+        "Enviar/Atualizar foto da fachada do bloco",
         type=["jpg", "jpeg", "png"],
-        accept_multiple_files=True,
-        key=f"pfiles_{st.session_state.uploader_reset}"
+        accept_multiple_files=False,
+        key=f"facade_{block_id}"
     )
-
-    if st.button("Salvar patologia(s)", key=f"btn_save_path_{inspection_id}"):
-
-        if not uploaded_files:
-            st.error("Envie pelo menos 1 foto.")
+    
+    if st.button("Salvar foto da fachada", key=f"save_facade_{block_id}"):
+    
+        if not facade_file:
+            st.error("Envie uma foto para salvar.")
             st.stop()
-
+    
         try:
-            saved_count = 0
-            base_ts = str(int(datetime.now().timestamp() * 1000))
-
-            for idx, uf in enumerate(uploaded_files, start=1):
-                # bytes (compatível com Streamlit Cloud)
-                img_bytes = uf.getvalue()
-
-                ext = guess_ext(uf.name)
-                ctype = content_type_from_ext(ext)
-
-                # id único por arquivo (evita sobrescrever e evita duplicar nome)
-                photo_id = f"{base_ts}_{idx}"
-
-                object_path = storage_key_for_pathology(
-                    company_name, work_name, visit_choice,
-                    block_name, apt_number, pathology_type,
-                    photo_id, ext
-                )
-
-                public_url = upload_bytes_to_storage(object_path, img_bytes, ctype)
-
-                # grava no SQLite a URL pública
-                add_pathology(inspection_id, pathology_type, comment, public_url)
-                saved_count += 1
-
-            st.success(f"{saved_count} foto(s) salva(s) no Supabase!")
-            st.session_state.uploader_reset += 1
+            # bytes da imagem (mais compatível no Streamlit Cloud)
+            img_bytes = facade_file.getvalue()
+    
+           
+            ext = guess_ext(facade_file.name)
+            ctype = content_type_from_ext(ext)
+            ts = str(int(datetime.now().timestamp() * 1000))
+    
+            # caminho no bucket (sem caracteres inválidos)
+            object_path = storage_key_for_facade(company_name, work_name, block_name, ts, ext)
+    
+            # upload no Storage -> retorna URL pública
+            public_url = upload_bytes_to_storage(object_path, img_bytes, ctype)
+    
+            # salva URL no SQLite (block_facades)
+            upsert_block_facade(block_id, public_url)
+    
+            st.success("Foto da fachada salva com sucesso!")
             st.rerun()
-
+    
         except Exception as e:
-            st.error(f"Erro ao salvar patologia(s): {e}")
-
+            st.error(f"Erro ao salvar fachada: {e}")
+    
     st.divider()
-    st.subheader("Patologias registradas (este apartamento / esta data)")
-
-    registros = list_pathologies(inspection_id)
-    if not registros:
-        st.info("Nenhuma patologia cadastrada.")
-    else:
-        for pid, ptype, pcomment, purl, pdate in registros:
-            st.write(f"**{ptype}** - {pcomment or 'Sem comentário'} - {pdate}")
-            if purl:
-                st.image(purl, width=320)
+    
+    # ======================
+    # APARTAMENTOS
+    # ======================
+    
+    apartments = list_apartments(block_id)
+    
+    apt_map = {num:aid for aid,num in apartments}
+    
+    apt_choice = st.selectbox(
+        "Apartamento",
+        ["(selecionar)", "+ Novo apartamento"] + list(apt_map.keys())
+    )
+    
+    # ======================
+    # CRIAR NOVO APARTAMENTO
+    # ======================
+    
+    if apt_choice == "+ Novo apartamento":
+    
+        new_apt = st.text_input(
+            "Número do novo apartamento",
+            placeholder="Ex.: 302"
+        )
+    
+        if st.button("Criar apartamento"):
+    
+            anum = (new_apt or "").strip()
+    
+            if not anum:
+                st.warning("Digite o número do apartamento.")
+    
+            else:
+    
+                ok = add_apartment(block_id, anum)
+    
+                if ok:
+                    st.success("Apartamento criado com sucesso!")
+                    st.rerun()
+    
+                else:
+                    st.error("Esse apartamento já existe neste bloco.")
+    
+        st.stop()
+    
+    
+    # ======================
+    # APARTAMENTO NÃO SELECIONADO
+    # ======================
+    
+    if apt_choice == "(selecionar)":
+        st.info("Selecione um apartamento ou crie um novo.")
+        st.stop()
+    
+    
+    apt_number = apt_choice
+    
+    
+    # ======================
+    # INSPEÇÃO
+    # ======================
+    
+    insp = get_or_create_inspection(visit_id, apartment_id)
+    
+    inspection_id, created_at, t1, t2, t3, r1, r2, r3, notes = insp
+    
+    st.success(f"Contexto: {company_name} • {work_name} • {visit_choice} • {block_name} • Apto {apt_number}")
+    st.caption(f"Inspeção ID: {inspection_id} | Criada em: {created_at}")
+    
+    st.divider()
+    
+    ROOMS = [
+        "Sala",
+        "Cozinha",
+        "Banheiro",
+        "Basculante",
+        "Quarto Solteiro",
+        "Quarto Casal",
+        "Cozinha - Janela",
+        "Varanda",
+        "Quarto Solteiro - Janela",
+        "Quarto Casal - Janela",
+        "Outro"
+    ]
+    
+    
+    def room_index(value):
+        if value in ROOMS:
+            return ROOMS.index(value)
+        return 0
+    
+    
+    def fix_room(selected, other):
+        if selected == "Outro":
+            return (other or "").strip() or "Outro"
+        return selected
+    
+    
+    col1, col2 = st.columns(2)
+    
+    # ======================
+    # ESPESSURAS
+    # ======================
+    
+    with col1:
+    
+        st.subheader("Espessuras (mm) + Local")
+    
+        with st.form("form_medidas", clear_on_submit=False):
+    
+            v1 = st.text_input(
+                "Espessura 1 (mm)",
+                value="" if t1 is None else str(t1)
+            )
+    
+            loc1_sel = st.selectbox(
+                "Local - Espessura 1",
+                ROOMS,
+                index=room_index(r1)
+            )
+    
+    
+            v2 = st.text_input(
+                "Espessura 2 (mm)",
+                value="" if t2 is None else str(t2)
+            )
+    
+            loc2_sel = st.selectbox(
+                "Local - Espessura 2",
+                ROOMS,
+                index=room_index(r2)
+            )
+    
+    
+            v3 = st.text_input(
+                "Espessura 3 (mm)",
+                value="" if t3 is None else str(t3)
+            )
+    
+            loc3_sel = st.selectbox(
+                "Local - Espessura 3",
+                ROOMS,
+                index=room_index(r3)
+            )
+    
+    
+            other_room = st.text_input(
+                "Se escolher 'Outro', escreva aqui",
+                placeholder="Ex.: Hall / Área de serviço"
+            )
+    
+    
+            notes_in = st.text_area(
+                "Observações",
+                value=notes or "",
+                height=120
+            )
+    
+    
+            submitted = st.form_submit_button("Salvar vistoria")
+    
+    
+        loc1 = fix_room(loc1_sel, other_room)
+        loc2 = fix_room(loc2_sel, other_room)
+        loc3 = fix_room(loc3_sel, other_room)
+    
+    
+        if submitted:
+    
+            n1 = safe_float(v1)
+            n2 = safe_float(v2)
+            n3 = safe_float(v3)
+    
+            if n1 is None or n2 is None or n3 is None:
+    
+                st.error("Preencha as 3 espessuras com números válidos.")
+    
+            else:
+    
+                update_inspection(
+                    inspection_id,
+                    n1,
+                    n2,
+                    n3,
+                    loc1,
+                    loc2,
+                    loc3,
+                    notes_in
+                )
+    
+                st.success("Vistoria salva com sucesso!")
+    
+                st.rerun()
+    
+    with col2:
+        st.subheader("Patologias")
+    
+        PATHOLOGIES = [
+            "Fissura", "Aresta", "Armadura aparente", "Armadura deslocada", "Segregação",
+            "Desvio de planicidade", "Juntas de concretagem", "Espaçador deslocado",
+            "Espaçador rotacionado", "Eletroduto aparente", "Material contaminado",
+            "Forma suja", "Outro"
+        ]
+    
+        pathology_type = st.selectbox("Tipo de patologia", PATHOLOGIES, key="ptype")
+        comment = st.text_input("Comentário (opcional)", placeholder="Ex.: escada para 1° andar", key="pcomment")
+    
+        # usado para "resetar" o uploader depois de salvar (evita acumular)
+        if "uploader_reset" not in st.session_state:
+            st.session_state.uploader_reset = 0
+    
+        uploaded_files = st.file_uploader(
+            "Enviar foto(s)",
+            type=["jpg", "jpeg", "png"],
+            accept_multiple_files=True,
+            key=f"pfiles_{st.session_state.uploader_reset}"
+        )
+    
+        if st.button("Salvar patologia(s)", key=f"btn_save_path_{inspection_id}"):
+    
+            if not uploaded_files:
+                st.error("Envie pelo menos 1 foto.")
+                st.stop()
+    
+            try:
+                saved_count = 0
+                base_ts = str(int(datetime.now().timestamp() * 1000))
+    
+                for idx, uf in enumerate(uploaded_files, start=1):
+                    # bytes (compatível com Streamlit Cloud)
+                    img_bytes = uf.getvalue()
+    
+                    ext = guess_ext(uf.name)
+                    ctype = content_type_from_ext(ext)
+    
+                    # id único por arquivo (evita sobrescrever e evita duplicar nome)
+                    photo_id = f"{base_ts}_{idx}"
+    
+                    object_path = storage_key_for_pathology(
+                        company_name, work_name, visit_choice,
+                        block_name, apt_number, pathology_type,
+                        photo_id, ext
+                    )
+    
+                    public_url = upload_bytes_to_storage(object_path, img_bytes, ctype)
+    
+                    # grava no SQLite a URL pública
+                    add_pathology(inspection_id, pathology_type, comment, public_url)
+                    saved_count += 1
+    
+                st.success(f"{saved_count} foto(s) salva(s) no Supabase!")
+                st.session_state.uploader_reset += 1
+                st.rerun()
+    
+            except Exception as e:
+                st.error(f"Erro ao salvar patologia(s): {e}")
+    
+        st.divider()
+        st.subheader("Patologias registradas (este apartamento / esta data)")
+    
+        registros = list_pathologies(inspection_id)
+        if not registros:
+            st.info("Nenhuma patologia cadastrada.")
+        else:
+            for pid, ptype, pcomment, purl, pdate in registros:
+                st.write(f"**{ptype}** - {pcomment or 'Sem comentário'} - {pdate}")
+                if purl:
+                    st.image(purl, width=320)
 
 
 # ======================
 # EXPORTAÇÕES  (cole NO UGAR do seu bloco "else: st.header('EXPORTAÇÕES') ...")
 # ======================
-else:
+else:    
     st.header("EXPORTAÇÕES")
     st.caption("Baixe a planilha (espessuras) e os ZIPs separados: Patologias e Fachadas.")
 
@@ -1249,6 +1249,7 @@ else:
                     )
             except Exception as e:
                 st.error(f"Falha ao gerar ZIP Fachadas: {e}")
+
 
 
 
